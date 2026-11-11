@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Diário de Campo
 
-## Getting Started
+Catálogo de amostras de campo (rocha, solo, água, sedimento) com local no mapa, data, foto e observações.
+Cada usuário vê apenas as próprias amostras.
 
-First, run the development server:
+**Stack:** Next.js 16 (App Router) · TypeScript · Tailwind + shadcn/ui · PostgreSQL (Supabase) + Prisma 7 · Auth.js (NextAuth v5) · Zod · React-Leaflet + OpenStreetMap · UploadThing
+
+## Rodando localmente
 
 ```bash
+npm install
+cp .env.example .env      # e preencha (veja abaixo)
+npm run db:deploy         # cria as tabelas no banco
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Banco: Supabase
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Crie um projeto em <https://supabase.com> (anote a senha do banco).
+2. No projeto, clique em **Connect** → aba **ORMs** → **Prisma** e copie as duas URLs para o `.env`:
+   - `DATABASE_URL` — pooler em modo transação (porta **6543**, com `?pgbouncer=true`): usada pelo app.
+   - `DIRECT_URL` — pooler em modo sessão (porta **5432**): usada pelas migrations (`prisma.config.ts`).
+3. `npm run db:deploy`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+A migration `habilitar_rls` liga o Row Level Security em todas as tabelas. Isso bloqueia o acesso pela
+API REST do Supabase (chave `anon`), que de outro modo exporia sessões e tokens. O app não é afetado,
+porque o Prisma conecta como dono das tabelas. A separação entre usuários é feita no código
+(`src/lib/amostras.ts` e `actions.ts` sempre filtram por `userId`).
 
-## Learn More
+> Alternativa offline: `npx prisma dev -d -n diario-de-campo` sobe um Postgres local e imprime a
+> `DATABASE_URL` (nesse caso, deixe `DIRECT_URL` vazia).
 
-To learn more about Next.js, take a look at the following resources:
+### Login (pelo menos um provedor)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **GitHub:** <https://github.com/settings/developers> → *New OAuth App*
+  Callback: `http://localhost:3000/api/auth/callback/github` → `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET`
+- **Google:** Google Cloud Console → *Credentials* → *OAuth client ID* (Web)
+  Redirect URI: `http://localhost:3000/api/auth/callback/google` → `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Só aparecem na tela de login os provedores com credenciais no `.env`.
 
-## Deploy on Vercel
+### Fotos (opcional)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Crie um app em <https://uploadthing.com> e copie o token para `UPLOADTHING_TOKEN`. Sem ele, o formulário funciona sem o campo de foto.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Estrutura
+
+```
+prisma/schema.prisma          Modelos: Amostra + tabelas do Auth.js
+src/auth.ts                   Configuração do Auth.js (provedores, adapter Prisma)
+src/lib/validacao.ts          Schemas Zod (amostra e filtros)
+src/lib/amostras.ts           Consultas — sempre filtradas por userId
+src/app/amostras/actions.ts   Server Actions: criar, editar, excluir
+src/app/amostras/             Lista/mapa + filtros, nova, detalhe, editar
+src/components/mapa-leaflet   Mapa (pontos coloridos por tipo; clique para escolher local)
+src/app/api/uploadthing/      Endpoint de upload (exige login)
+```
+
+## Deploy na Vercel
+
+1. Suba o projeto para o GitHub e importe na Vercel.
+2. Na Vercel, defina as variáveis: `DATABASE_URL` (a do pooler, porta 6543), `AUTH_SECRET`, credenciais OAuth e `UPLOADTHING_TOKEN`.
+   `DIRECT_URL` não é necessária na Vercel: as migrations rodam da sua máquina.
+3. Sempre que houver migration nova: `npm run db:deploy` localmente, com o `.env` apontando para o Supabase.
+4. Nos apps OAuth, adicione o callback de produção: `https://SEU-APP.vercel.app/api/auth/callback/github` (e/ou `google`).

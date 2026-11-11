@@ -3,11 +3,7 @@
 Catálogo de amostras de campo para geologia e meio ambiente. Registre cada coleta com **local no mapa,
 data, tipo, foto e observações**, e depois consulte tudo em lista ou no mapa, com filtros.
 
-<!-- Depois do deploy, adicione o link e um print:
-**[Ver demo →](https://seu-app.vercel.app)**
-
-![Tela do mapa com as amostras](docs/screenshot.png)
--->
+**[Ver demo →](https://diario-de-campo-sigma.vercel.app/)**
 
 ## Funcionalidades
 

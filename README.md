@@ -1,65 +1,199 @@
-# Diário de Campo
+# 🪨 Diário de Campo
 
-Catálogo de amostras de campo (rocha, solo, água, sedimento) com local no mapa, data, foto e observações.
-Cada usuário vê apenas as próprias amostras.
+Catálogo de amostras de campo para geologia e meio ambiente. Registre cada coleta com **local no mapa,
+data, tipo, foto e observações**, e depois consulte tudo em lista ou no mapa, com filtros.
 
-**Stack:** Next.js 16 (App Router) · TypeScript · Tailwind + shadcn/ui · PostgreSQL (Supabase) + Prisma 7 · Auth.js (NextAuth v5) · Zod · React-Leaflet + OpenStreetMap · UploadThing
+<!-- Depois do deploy, adicione o link e um print:
+**[Ver demo →](https://seu-app.vercel.app)**
+
+![Tela do mapa com as amostras](docs/screenshot.png)
+-->
+
+## Funcionalidades
+
+- **Login com GitHub ou Google**: cada usuário vê e edita apenas as próprias amostras.
+- **Cadastro de amostras** de rocha, solo, água ou sedimento, com título, data da coleta e observações.
+- **Escolha do local** clicando no mapa, pelo GPS do celular ou digitando as coordenadas.
+- **Foto da amostra** enviada direto do formulário (até 4 MB).
+- **Lista e mapa**: pontos coloridos por tipo, com popup e link para cada amostra.
+- **Filtros** por tipo, período e título. Os filtros ficam na URL, então dá para salvar ou compartilhar o link de uma busca.
+- **Validação** dos dados no servidor, com mensagens em português (coordenadas válidas, data que não está no futuro, campos obrigatórios).
+
+## Stack
+
+| Camada | Tecnologia |
+|---|---|
+| Framework | [Next.js 16](https://nextjs.org) (App Router, Server Components, Server Actions) + TypeScript |
+| Interface | [Tailwind CSS 4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) |
+| Banco | PostgreSQL no [Supabase](https://supabase.com) |
+| ORM | [Prisma 7](https://www.prisma.io) com driver adapter `pg` |
+| Autenticação | [Auth.js](https://authjs.dev) (NextAuth v5) com sessões salvas no banco |
+| Validação | [Zod 4](https://zod.dev) |
+| Mapa | [React-Leaflet](https://react-leaflet.js.org) + [OpenStreetMap](https://www.openstreetmap.org), sem chave de API |
+| Upload | [UploadThing](https://uploadthing.com) (o banco guarda só a URL da foto) |
+| Deploy | [Vercel](https://vercel.com) |
+
+## Como funciona
+
+```mermaid
+flowchart LR
+    U[Navegador] -->|formulários| SA[Server Actions]
+    U -->|páginas| RSC[Server Components]
+    U -->|foto| UT[UploadThing]
+    SA --> Z[Validação Zod]
+    Z --> P[Prisma]
+    RSC --> P
+    P --> DB[(Supabase Postgres)]
+    U -->|login| AUTH[Auth.js] --> DB
+```
+
+Algumas decisões do projeto:
+
+- **Os dados de cada usuário ficam isolados no servidor.** Toda consulta, edição e exclusão filtra por `userId`
+  ([`src/lib/amostras.ts`](src/lib/amostras.ts), [`actions.ts`](src/app/amostras/actions.ts)). Abrir pela URL
+  uma amostra de outra pessoa retorna 404.
+- **O RLS fica ligado em todas as tabelas** (migration `habilitar_rls`). O Supabase expõe o schema `public`
+  pela API REST com uma chave pública, e o RLS fecha esse acesso. O app não é afetado, porque o Prisma
+  conecta como dono das tabelas.
+- **Os formulários funcionam sem JavaScript.** As Server Actions e os filtros (um formulário `GET`) usam HTML puro;
+  o JavaScript só melhora a experiência (mapa, GPS, upload).
+- **O mapa só é carregado no navegador** (`next/dynamic` com `ssr: false`), porque o Leaflet depende de `window`.
+
+## Modelo de dados
+
+```prisma
+enum TipoAmostra { ROCHA SOLO AGUA SEDIMENTO }
+
+model Amostra {
+  id          String      @id @default(cuid())
+  userId      String
+  titulo      String
+  tipo        TipoAmostra
+  latitude    Float
+  longitude   Float
+  dataColeta  DateTime    @db.Date
+  observacoes String?
+  fotoUrl     String?
+  criadoEm    DateTime    @default(now())
+  atualizadoEm DateTime   @updatedAt
+}
+```
+
+`User`, `Account`, `Session` e `VerificationToken` são as tabelas padrão do Auth.js. O schema completo está em [`prisma/schema.prisma`](prisma/schema.prisma).
 
 ## Rodando localmente
 
+Pré-requisito: Node.js 22 ou mais recente.
+
 ```bash
+git clone https://github.com/Gabrielnambu/Diario-de-Campo.git
+cd Diario-de-Campo
 npm install
-cp .env.example .env      # e preencha (veja abaixo)
+cp .env.example .env      # preencha conforme a seção abaixo
 npm run db:deploy         # cria as tabelas no banco
-npm run dev
+npm run dev               # http://localhost:3000
 ```
 
-### Banco: Supabase
+### Variáveis de ambiente
 
-1. Crie um projeto em <https://supabase.com> (anote a senha do banco).
-2. No projeto, clique em **Connect** → aba **ORMs** → **Prisma** e copie as duas URLs para o `.env`:
-   - `DATABASE_URL` — pooler em modo transação (porta **6543**, com `?pgbouncer=true`): usada pelo app.
-   - `DIRECT_URL` — pooler em modo sessão (porta **5432**): usada pelas migrations (`prisma.config.ts`).
-3. `npm run db:deploy`.
+| Variável | Obrigatória | Para que serve |
+|---|---|---|
+| `DATABASE_URL` | ✅ | Conexão usada pelo app (no Supabase, o pooler na porta **6543** com `?pgbouncer=true`) |
+| `DIRECT_URL` | Supabase | Conexão usada pelas migrations (pooler na porta **5432**) |
+| `AUTH_SECRET` | ✅ | Chave que protege as sessões. Gere com `npx auth secret` |
+| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | um provedor | Login com GitHub |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | um provedor | Login com Google |
+| `UPLOADTHING_TOKEN` | — | Upload de fotos. Sem ela, o formulário funciona sem o campo de foto |
+| `AUTH_TRUST_HOST` | — | Use `true` só para rodar `npm start` fora da Vercel |
 
-A migration `habilitar_rls` liga o Row Level Security em todas as tabelas. Isso bloqueia o acesso pela
-API REST do Supabase (chave `anon`), que de outro modo exporia sessões e tokens. O app não é afetado,
-porque o Prisma conecta como dono das tabelas. A separação entre usuários é feita no código
-(`src/lib/amostras.ts` e `actions.ts` sempre filtram por `userId`).
+A tela de login mostra apenas os provedores que têm credenciais configuradas.
 
-> Alternativa offline: `npx prisma dev -d -n diario-de-campo` sobe um Postgres local e imprime a
-> `DATABASE_URL` (nesse caso, deixe `DIRECT_URL` vazia).
+<details>
+<summary><strong>Configurar o Supabase</strong></summary>
 
-### Login (pelo menos um provedor)
+1. Crie um projeto em [supabase.com](https://supabase.com) e anote a senha do banco.
+2. No projeto, clique em **Connect** → aba **ORMs** → **Prisma**.
+3. Copie as duas URLs para `DATABASE_URL` (porta 6543) e `DIRECT_URL` (porta 5432), trocando `[YOUR-PASSWORD]` pela senha.
 
-- **GitHub:** <https://github.com/settings/developers> → *New OAuth App*
-  Callback: `http://localhost:3000/api/auth/callback/github` → `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET`
-- **Google:** Google Cloud Console → *Credentials* → *OAuth client ID* (Web)
-  Redirect URI: `http://localhost:3000/api/auth/callback/google` → `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`
+Para trabalhar sem internet, `npx prisma dev -d -n diario-de-campo` sobe um Postgres local e mostra a
+`DATABASE_URL`. Nesse caso, deixe a `DIRECT_URL` vazia.
+</details>
 
-Só aparecem na tela de login os provedores com credenciais no `.env`.
+<details>
+<summary><strong>Configurar o login com GitHub</strong></summary>
 
-### Fotos (opcional)
+1. Acesse [github.com/settings/developers](https://github.com/settings/developers) → **OAuth Apps** → **New OAuth App**.
+2. Em **Homepage URL**, coloque `http://localhost:3000`.
+3. Em **Redirect URI**, coloque `http://localhost:3000/api/auth/callback/github`.
+4. Copie o **Client ID** e gere um **Client secret**, depois cole nas variáveis `AUTH_GITHUB_*`.
+</details>
 
-Crie um app em <https://uploadthing.com> e copie o token para `UPLOADTHING_TOKEN`. Sem ele, o formulário funciona sem o campo de foto.
+<details>
+<summary><strong>Configurar o login com Google</strong></summary>
+
+1. No [Google Cloud Console](https://console.cloud.google.com), crie um projeto.
+2. Em **APIs & Services → OAuth consent screen**, configure o app com público **External**. Enquanto o app
+   estiver em modo de teste, adicione seu e-mail em **Test users**.
+3. Em **Clients → Create client**, escolha **Web application**:
+   - Authorized JavaScript origins: `http://localhost:3000`
+   - Authorized redirect URIs: `http://localhost:3000/api/auth/callback/google`
+4. Copie o Client ID e o Client secret para as variáveis `AUTH_GOOGLE_*`.
+</details>
+
+### Scripts
+
+| Comando | O que faz |
+|---|---|
+| `npm run dev` | Servidor de desenvolvimento |
+| `npm run build` / `npm start` | Build e servidor de produção |
+| `npm run lint` | ESLint |
+| `npm run db:migrate` | Cria uma migration a partir de mudanças no schema (desenvolvimento) |
+| `npm run db:deploy` | Aplica as migrations pendentes no banco do `.env` |
+| `npm run db:studio` | Abre o Prisma Studio para ver e editar os dados |
 
 ## Estrutura
 
 ```
-prisma/schema.prisma          Modelos: Amostra + tabelas do Auth.js
-src/auth.ts                   Configuração do Auth.js (provedores, adapter Prisma)
-src/lib/validacao.ts          Schemas Zod (amostra e filtros)
-src/lib/amostras.ts           Consultas — sempre filtradas por userId
-src/app/amostras/actions.ts   Server Actions: criar, editar, excluir
-src/app/amostras/             Lista/mapa + filtros, nova, detalhe, editar
-src/components/mapa-leaflet   Mapa (pontos coloridos por tipo; clique para escolher local)
-src/app/api/uploadthing/      Endpoint de upload (exige login)
+prisma/
+  schema.prisma              Modelos (Amostra + Auth.js)
+  migrations/                Histórico de migrations, incluindo o RLS
+src/
+  auth.ts                    Auth.js: provedores, adapter Prisma, sessão
+  app/
+    amostras/
+      page.tsx               Lista e mapa com filtros
+      nova/                  Cadastro
+      [id]/                  Detalhe e edição
+      actions.ts             Server Actions: criar, editar e excluir
+    login/                   Tela de login
+    api/auth/                Rotas do Auth.js
+    api/uploadthing/         Upload de foto (exige login)
+  components/
+    amostra-form.tsx         Formulário com mapa, GPS e upload
+    mapa-leaflet.tsx         Mapa (exibição e escolha de local)
+    filtros-amostras.tsx     Filtros salvos na URL
+  lib/
+    amostras.ts              Consultas ao banco, sempre filtradas por usuário
+    validacao.ts             Schemas Zod
+    prisma.ts                Prisma Client com o adapter pg
 ```
 
 ## Deploy na Vercel
 
-1. Suba o projeto para o GitHub e importe na Vercel.
-2. Na Vercel, defina as variáveis: `DATABASE_URL` (a do pooler, porta 6543), `AUTH_SECRET`, credenciais OAuth e `UPLOADTHING_TOKEN`.
-   `DIRECT_URL` não é necessária na Vercel: as migrations rodam da sua máquina.
-3. Sempre que houver migration nova: `npm run db:deploy` localmente, com o `.env` apontando para o Supabase.
-4. Nos apps OAuth, adicione o callback de produção: `https://SEU-APP.vercel.app/api/auth/callback/github` (e/ou `google`).
+1. Importe o repositório na Vercel.
+2. Em **Environment Variables**, defina `DATABASE_URL` (porta 6543), `AUTH_SECRET` (gere um novo,
+   diferente do de desenvolvimento), as credenciais OAuth e, se for usar fotos, o `UPLOADTHING_TOKEN`.
+3. Antes do primeiro acesso, aplique as migrations no Supabase. Rode `npm run db:deploy` na sua máquina,
+   com o `.env` apontando para o Supabase.
+4. Adicione a URL de produção nos apps OAuth:
+   `https://SEU-APP.vercel.app/api/auth/callback/github` (e/ou `/google`).
+
+O Prisma Client é gerado no `postinstall`, então a Vercel não precisa de configuração extra. Cada `git push`
+na `main` publica uma versão nova.
+
+## Próximos passos
+
+- [ ] Exportar as amostras em CSV ou GeoJSON
+- [ ] Paginação na lista
+- [ ] Mais de uma foto por amostra
+- [ ] Modo offline para coletas sem sinal (PWA)
